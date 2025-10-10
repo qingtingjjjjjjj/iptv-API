@@ -1,9 +1,9 @@
 import os, re, requests
 
-# ✅ 文件名（始终在仓库根目录）
+# 输出文件路径
 outfile = os.path.join(os.getcwd(), "cmlive.txt")
 
-# ✅ 自动创建文件
+# 自动创建文件
 if not os.path.exists(outfile):
     with open(outfile, "w", encoding="utf-8") as f:
         f.write("")
@@ -11,7 +11,7 @@ if not os.path.exists(outfile):
 else:
     print(f"📄 已存在: {outfile}")
 
-# ✅ 数据源
+# 数据源
 url = "https://raw.githubusercontent.com/q1017673817/iptvz/refs/heads/main/zubo_all.txt"
 
 print("📡 正在下载直播源...")
@@ -27,12 +27,12 @@ except Exception as e:
 groups = {}
 current_group = None
 
-# ✅ 省份关键词
+# 省份关键词
 provinces = ["北京","天津","河北","山西","内蒙古","辽宁","吉林","黑龙江","上海","江苏","浙江",
              "安徽","福建","江西","山东","河南","湖北","湖南","广东","广西","海南","重庆","四川",
              "贵州","云南","西藏","陕西","甘肃","青海","宁夏","新疆","港澳台"]
 
-# ✅ 分类逻辑
+# 分类逻辑
 for line in lines:
     if line.endswith(",#genre#"):
         current_group = line.replace(",#genre#", "")
@@ -65,7 +65,7 @@ for line in lines:
 
     groups.setdefault(group, []).append(f"{name},{link}")
 
-# ✅ 写入文件
+# 写入文件
 with open(outfile, "w", encoding="utf-8") as f:
     for g, items in groups.items():
         f.write(f"{g},#genre#\n")
