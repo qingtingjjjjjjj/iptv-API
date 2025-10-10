@@ -3,6 +3,8 @@ import re
 import asyncio
 import aiohttp
 from time import time
+from datetime import datetime, timedelta
+import requests
 
 # 输出文件
 outfile = os.path.join(os.getcwd(), "cmlive.txt")
@@ -17,7 +19,6 @@ url = "https://raw.githubusercontent.com/q1017673817/iptvz/refs/heads/main/zubo_
 
 # 下载源文件
 print("📡 正在下载直播源...")
-import requests
 try:
     res = requests.get(url, timeout=60)
     res.encoding = 'utf-8'
@@ -133,8 +134,18 @@ for group_name, items in groups.items():
         groups[group_name] = sorted(items, key=lambda x: x['time'])
     print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条")
 
+# 获取北京时间（UTC+8）
+now = datetime.utcnow() + timedelta(hours=8)
+update_time = now.strftime("%Y%m%d %H:%M")
+
 # 写入文件
 with open(outfile, "w", encoding="utf-8") as f:
+    # ✅ 写入动态北京时间
+    f.write("更新时间,#genre#\n")
+    f.write(f"{update_time},https://d.kstore.dev/download/8880/%E5%85%AC%E5%91%8A.mp4\n")
+    f.write("关于本源(塔利班维护),https://v.cdnlz12.com/20250131/18183_a5e8965b/index.m3u8\n\n")
+    
+    # 写入分组内容
     for g, items in groups.items():
         f.write(f"{g},#genre#\n")
         for i in items:
@@ -142,4 +153,4 @@ with open(outfile, "w", encoding="utf-8") as f:
         f.write("\n")
 
 total = sum(len(v) for v in groups.values())
-print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成")
+print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成（北京时间）")
