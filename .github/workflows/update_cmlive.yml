@@ -1,10 +1,9 @@
 name: 更新直播源
 
-# 支持手动触发和定时触发
 on:
-  workflow_dispatch:
+  workflow_dispatch:    # 支持手动触发
   schedule:
-    - cron: '0 0 * * *'  # UTC 时间每天 00:00 (北京时间 08:00)
+    - cron: '0 0 * * *' # 每天 UTC 00:00 (北京时间 08:00)
 
 permissions:
   contents: write  # 允许推送文件
@@ -12,7 +11,6 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
-
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
@@ -23,12 +21,12 @@ jobs:
           python-version: '3.11'
 
       - name: 安装依赖
-        run: pip install requests
+        run: pip install aiohttp requests
 
-      - name: 运行生成脚本
+      - name: 运行异步测速脚本
         run: python update_live.py
 
-      - name: 查看文件生成结果
+      - name: 查看生成文件
         run: |
           echo "📁 当前目录文件："
           ls -la
