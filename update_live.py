@@ -49,6 +49,8 @@ for line in lines:
         group = "央视频道"
     elif "卫视" in name:
         group = "卫视频道"
+        # 去掉尾巴
+        name = re.match(r"(.*?卫视)", name).group(1)
     else:
         matched = False
         if current_group:
@@ -73,11 +75,13 @@ async def test_stream(session, item):
     start = time()
     try:
         async with session.get(item["link"], timeout=5) as resp:
-            await resp.content.read(1024)  # 只读前1KB，避免下载整个流
+            await resp.content.read(1024)  # 只读前1KB
         elapsed = time() - start
-        return (item["name"], item["link"], elapsed)
+        item['time'] = elapsed
+        return item
     except:
-        return (item["name"], item["link"], float("inf"))
+        item['time'] = float("inf")
+        return item
 
 # 异步批量测速
 async def test_group(items):
@@ -86,19 +90,48 @@ async def test_group(items):
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         tasks = [asyncio.create_task(test_stream(session, item)) for item in items]
         results = await asyncio.gather(*tasks)
-    # 按响应时间升序排序
-    results.sort(key=lambda x: x[2])
-    return [{"name": n, "link": l} for n, l, t in results]
+    return results
 
 # 执行测速
 print("⏱ 开始异步并行测速...")
 for group_name, items in groups.items():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    items_sorted = loop.run_until_complete(test_group(items))
-    groups[group_name] = items_sorted
+    items = loop.run_until_complete(test_group(items))
     loop.close()
-    print(f"✅ {group_name} 测速完成，共 {len(items_sorted)} 条")
+    # 分组排序逻辑
+    if group_name == "央视频道":
+        cctv_order = [
+            "CCTV-1综合","CCTV-2财经","CCTV-3综艺","CCTV-4中文国际","CCTV-5体育",
+            "CCTV-5+体育赛事","CCTV-6电影","CCTV-7国防军事","CCTV-8电视剧",
+            "CCTV-9纪录","CCTV-10科教","CCTV-11戏曲","CCTV-12社会与法",
+            "CCTV-13新闻","CCTV-14少儿","CCTV-15音乐","CCTV-16奥林匹克",
+            "CCTV-17农业农村","CCTV-4K超高清","CCTV-兵器科技","CCTV-第一剧场",
+            "CCTV-电视指南","CCTV-风云剧场","CCTV-风云音乐","CCTV-风云足球",
+            "CCTV-高尔夫·网球","CCTV-怀旧剧场","CCTV-女性时尚","CCTV-世界地理",
+            "CCTV-央视台球","CCTV-文化精品"
+        ]
+        cctv_groups = {}
+        for item in items:
+            cctv_groups.setdefault(item['name'], []).append(item)
+        sorted_items = []
+        for name in cctv_order:
+            if name in cctv_groups:
+                sorted_items.extend(sorted(cctv_groups[name], key=lambda x: x['time']))
+        groups[group_name] = sorted_items
+    elif group_name == "卫视频道":
+        # 同名卫视频道内部按测速快排
+        name_groups = {}
+        for item in items:
+            name_groups.setdefault(item['name'], []).append(item)
+        sorted_items = []
+        for name, group_items in name_groups.items():
+            sorted_items.extend(sorted(group_items, key=lambda x: x['time']))
+        groups[group_name] = sorted_items
+    else:
+        # 其他分组按测速快排
+        groups[group_name] = sorted(items, key=lambda x: x['time'])
+    print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条")
 
 # 写入文件
 with open(outfile, "w", encoding="utf-8") as f:
@@ -109,4 +142,4 @@ with open(outfile, "w", encoding="utf-8") as f:
         f.write("\n")
 
 total = sum(len(v) for v in groups.values())
-print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按测速最快排序")
+print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成")
