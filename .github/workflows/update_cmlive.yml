@@ -1,35 +1,70 @@
-name: 更新直播源
+name: 自动检测并更新直播源（6小时）
 
 on:
-  workflow_dispatch:    # 手动触发
   schedule:
-    - cron: '0 0 * * *' # 每天 UTC 00:00 (北京时间 08:00)
+    # 每6小时检测一次（UTC = 北京时间 - 8）
+    # 即北京时间 00:00、06:00、12:00、18:00
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write  # 允许推送文件
+  contents: write
 
 jobs:
-  update:
+  check_and_update:
     runs-on: ubuntu-latest
 
     steps:
       - name: 检出仓库
         uses: actions/checkout@v4
 
-      - name: 设置 Python
+      - name: 获取当前北京时间
+        id: time
+        run: |
+          now=$(date -u -d '+8 hour' '+%Y-%m-%d %H:%M')
+          echo "🕒 当前北京时间: $now"
+          echo "current_time=$now" >> $GITHUB_OUTPUT
+
+      - name: 检测直播源接口是否更新
+        id: check
+        run: |
+          url="https://raw.githubusercontent.com/q1017673817/iptvz/refs/heads/main/zubo_all.txt"
+          echo "📡 正在检测直播源接口变化..."
+          curl -sL "$url" -o source.txt || { echo "❌ 下载接口失败"; exit 1; }
+
+          md5=$(md5sum source.txt | cut -d ' ' -f1)
+          echo "接口当前哈希: $md5"
+
+          old_hash=$(cat last_hash.txt 2>/dev/null || echo "")
+          if [ "$old_hash" = "$md5" ]; then
+            echo "🟢 接口未变化，跳过更新"
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ 检测到接口内容变化"
+            echo "$md5" > last_hash.txt
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 设置 Python 环境
+        if: steps.check.outputs.changed == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: 安装依赖
+        if: steps.check.outputs.changed == 'true'
         run: |
           pip install --upgrade pip
           pip install aiohttp requests
 
-      - name: 运行异步测速脚本
-        run: python update_live.py
+      - name: 执行测速更新脚本
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          echo "🚀 检测到接口变化，执行 update_live.py ..."
+          python update_live.py || { echo "❌ 脚本执行失败"; exit 1; }
 
-      - name: 查看生成文件
+      - name: 检查生成文件
+        if: steps.check.outputs.changed == 'true'
         run: |
           echo "📁 当前目录文件："
           ls -la
@@ -37,12 +72,22 @@ jobs:
           echo "📜 cmlive.txt 内容预览："
           head -n 20 cmlive.txt || echo "⚠️ 文件未生成"
 
-      - name: 提交并推送 cmlive.txt
+      - name: 提交更新
+        if: steps.check.outputs.changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add cmlive.txt
-          git diff --cached --quiet || git commit -m "📺 自动更新 cmlive.txt $(date '+%Y-%m-%d %H:%M:%S')"
-          git push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cmlive.txt last_hash.txt
+          if git diff --cached --quiet; then
+            echo "🟢 无需提交"
+          else
+            git commit -m "📺 自动更新 cmlive.txt（接口变化触发）$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+            git push
+          fi
+
+      - name: 无变化时提示
+        if: steps.check.outputs.changed != 'true'
+        run: |
+          echo "✅ 没有检测到接口变化，任务结束。"
