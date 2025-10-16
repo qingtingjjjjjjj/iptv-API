@@ -104,6 +104,9 @@ for group_name, items in groups.items():
     items = loop.run_until_complete(test_group(items))
     loop.close()
     
+    # 过滤无效源（time=inf 的）
+    items = [i for i in items if i['time'] != float("inf")]
+
     # 分组排序逻辑
     if group_name == "央视频道":
         cctv_order = [
@@ -135,7 +138,7 @@ for group_name, items in groups.items():
     else:
         groups[group_name] = sorted(items, key=lambda x: x['time'])
 
-    print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条")
+    print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条有效直播源")
 
 # 获取北京时间（UTC+8）
 now = datetime.utcnow() + timedelta(hours=8)
@@ -148,10 +151,12 @@ with open(outfile, "w", encoding="utf-8") as f:
     f.write("关于本源(塔利班维护),https://v.cdnlz12.com/20250131/18183_a5e8965b/index.m3u8\n\n")
     
     for g, items in groups.items():
+        if not items:
+            continue  # 没有有效源就跳过
         f.write(f"{g},#genre#\n")
         for i in items:
             f.write(f"{i['name']},{i['link']}\n")
         f.write("\n")
 
 total = sum(len(v) for v in groups.values())
-print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成（北京时间）")
+print(f"✅ 已生成 {outfile}，共 {total} 条有效直播源，分组内按要求排序完成（北京时间）")
