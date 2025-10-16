@@ -70,21 +70,25 @@ for line in lines:
 
     groups.setdefault(group, []).append({"name": name, "link": link})
 
-# 异步测速函数（1MB/s 为有效源）
+# 异步测速函数（200KB/s 为有效源 + 日志）
 async def test_stream(session, item):
     start = time()
     try:
         async with session.get(item["link"], timeout=10) as resp:
-            content = await resp.content.read(1024*1024)  # 读取前1MB
+            content = await resp.content.read(1024 * 1024)  # 读取前1MB
         elapsed = time() - start
         speed = len(content) / elapsed / (1024 * 1024)  # MB/s
-        if speed < 1:  # 小于1MB/s视为无效
+
+        if speed < 0.195:  # 小于约200KB/s视为无效
             item['time'] = float("inf")
+            print(f"❌ {item['name']}: {speed:.3f} MB/s (无效)")
         else:
             item['time'] = elapsed
+            print(f"✅ {item['name']}: {speed:.3f} MB/s")
         return item
-    except:
+    except Exception as e:
         item['time'] = float("inf")
+        print(f"⚠️ {item['name']}: 测速失败 ({e})")
         return item
 
 # 异步批量测速
