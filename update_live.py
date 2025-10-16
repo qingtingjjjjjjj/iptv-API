@@ -50,6 +50,7 @@ for line in lines:
         group = "央视频道"
     elif "卫视" in name:
         group = "卫视频道"
+        # 去掉尾巴
         name = re.match(r"(.*?卫视)", name).group(1)
     else:
         matched = False
@@ -70,31 +71,30 @@ for line in lines:
 
     groups.setdefault(group, []).append({"name": name, "link": link})
 
-# 异步测速函数（只保留≥1MB/s）
+# 异步测速函数，只保留 <=1秒的源
 async def test_stream(session, item):
     start = time()
     try:
-        async with session.get(item["link"], timeout=10) as resp:
-            data = await resp.content.read(1024*1024)  # 读1MB
+        async with session.get(item["link"], timeout=5) as resp:
+            await resp.content.read(1024)
         elapsed = time() - start
-        speed = len(data) / 1024 / 1024 / elapsed  # MB/s
-        if speed < 1:
-            item['time'] = float("inf")  # 无效源
+        item['time'] = elapsed
+        if elapsed <= 60:  # 只保留 1 分钟以内响应
+            return item
         else:
-            item['time'] = elapsed
-        return item
+            return None
     except:
-        item['time'] = float("inf")
-        return item
+        return None
 
 # 异步批量测速
 async def test_group(items):
-    timeout = aiohttp.ClientTimeout(total=10)
-    connector = aiohttp.TCPConnector(limit=100)  # 并发可控
+    timeout = aiohttp.ClientTimeout(total=5)
+    connector = aiohttp.TCPConnector(limit=1000)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         tasks = [asyncio.create_task(test_stream(session, item)) for item in items]
         results = await asyncio.gather(*tasks)
-    return results
+    # 过滤掉 None
+    return [r for r in results if r]
 
 # 执行测速
 print("⏱ 开始异步并行测速...")
@@ -103,9 +103,8 @@ for group_name, items in groups.items():
     asyncio.set_event_loop(loop)
     items = loop.run_until_complete(test_group(items))
     loop.close()
-    # 过滤无效源
-    items = [i for i in items if i['time'] != float("inf")]
-    # 排序逻辑
+
+    # 分组排序逻辑
     if group_name == "央视频道":
         cctv_order = [
             "CCTV-1综合","CCTV-2财经","CCTV-3综艺","CCTV-4中文国际","CCTV-5体育",
@@ -125,8 +124,17 @@ for group_name, items in groups.items():
             if name in cctv_groups:
                 sorted_items.extend(sorted(cctv_groups[name], key=lambda x: x['time']))
         groups[group_name] = sorted_items
+    elif group_name == "卫视频道":
+        name_groups = {}
+        for item in items:
+            name_groups.setdefault(item['name'], []).append(item)
+        sorted_items = []
+        for name, group_items in name_groups.items():
+            sorted_items.extend(sorted(group_items, key=lambda x: x['time']))
+        groups[group_name] = sorted_items
     else:
         groups[group_name] = sorted(items, key=lambda x: x['time'])
+
     print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条")
 
 # 获取北京时间（UTC+8）
@@ -146,4 +154,4 @@ with open(outfile, "w", encoding="utf-8") as f:
         f.write("\n")
 
 total = sum(len(v) for v in groups.values())
-print(f"✅ 已生成 {outfile}，共 {total} 条有效直播源（≥1MB/s）")
+print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成（北京时间）")
