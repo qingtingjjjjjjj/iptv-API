@@ -5,11 +5,11 @@ import aiohttp
 from time import time
 from datetime import datetime, timedelta
 import requests
+import statistics
 
 # 输出文件
 outfile = os.path.join(os.getcwd(), "cmlive.txt")
 
-# 创建或清空输出文件
 with open(outfile, "w", encoding="utf-8") as f:
     f.write("")
 print(f"📄 输出文件: {outfile}")
@@ -17,7 +17,6 @@ print(f"📄 输出文件: {outfile}")
 # 数据源 URL
 url = "https://raw.githubusercontent.com/q1017673817/iptvz/refs/heads/main/zubo_all.txt"
 
-# 下载源文件
 print("📡 正在下载直播源...")
 try:
     res = requests.get(url, timeout=60)
@@ -50,7 +49,6 @@ for line in lines:
         group = "央视频道"
     elif "卫视" in name:
         group = "卫视频道"
-        # 去掉尾巴
         name = re.match(r"(.*?卫视)", name).group(1)
     else:
         matched = False
@@ -71,36 +69,41 @@ for line in lines:
 
     groups.setdefault(group, []).append({"name": name, "link": link})
 
-# 异步测速函数
+# 异步测速函数（延迟 + 实测下载速度）
 async def test_stream(session, item):
     start = time()
     try:
-        async with session.get(item["link"], timeout=5) as resp:
-            await resp.content.read(1024)  # 只读前1KB
-        elapsed = time() - start
-        item['time'] = elapsed
-        return item
+        async with session.get(item["link"], timeout=8) as resp:
+            chunk = await resp.content.read(300 * 1024)  # 读取300KB
+            elapsed = time() - start
+            size_kb = len(chunk) / 1024
+            speed_kbps = size_kb / elapsed if elapsed > 0 else 0
+            item["time"] = elapsed
+            item["speed"] = round(speed_kbps, 2)
+            return item
     except:
-        item['time'] = float("inf")
+        item["time"] = float("inf")
+        item["speed"] = 0
         return item
 
 # 异步批量测速
 async def test_group(items):
-    timeout = aiohttp.ClientTimeout(total=5)
-    connector = aiohttp.TCPConnector(limit=1000)  # 最大并发1000
+    timeout = aiohttp.ClientTimeout(total=10)
+    connector = aiohttp.TCPConnector(limit=800)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
         tasks = [asyncio.create_task(test_stream(session, item)) for item in items]
         results = await asyncio.gather(*tasks)
     return results
 
 # 执行测速
-print("⏱ 开始异步并行测速...")
+print("⏱ 开始异步并行测速（延迟 + 下载速度）...")
 for group_name, items in groups.items():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     items = loop.run_until_complete(test_group(items))
     loop.close()
-    # 分组排序逻辑
+
+    # 排序：先速度后延迟
     if group_name == "央视频道":
         cctv_order = [
             "CCTV-1综合","CCTV-2财经","CCTV-3综艺","CCTV-4中文国际","CCTV-5体育",
@@ -118,34 +121,38 @@ for group_name, items in groups.items():
         sorted_items = []
         for name in cctv_order:
             if name in cctv_groups:
-                sorted_items.extend(sorted(cctv_groups[name], key=lambda x: x['time']))
+                sorted_items.extend(sorted(cctv_groups[name], key=lambda x: (-x["speed"], x["time"])))
         groups[group_name] = sorted_items
     elif group_name == "卫视频道":
-        # 同名卫视频道内部按测速快排
         name_groups = {}
         for item in items:
             name_groups.setdefault(item['name'], []).append(item)
         sorted_items = []
         for name, group_items in name_groups.items():
-            sorted_items.extend(sorted(group_items, key=lambda x: x['time']))
+            sorted_items.extend(sorted(group_items, key=lambda x: (-x["speed"], x["time"])))
         groups[group_name] = sorted_items
     else:
-        # 其他分组按测速快排
-        groups[group_name] = sorted(items, key=lambda x: x['time'])
-    print(f"✅ {group_name} 测速完成，共 {len(groups[group_name])} 条")
+        groups[group_name] = sorted(items, key=lambda x: (-x["speed"], x["time"]))
 
-# 获取北京时间（UTC+8）
+    # 📊 输出测速统计信息
+    speeds = [i["speed"] for i in items if i["speed"] > 0]
+    if speeds:
+        avg_speed = round(statistics.mean(speeds), 1)
+        max_speed = round(max(speeds), 1)
+        print(f"✅ {group_name} 测速完成，共 {len(items)} 条｜平均速度 {avg_speed} KB/s｜最快 {max_speed} KB/s")
+    else:
+        print(f"⚠️ {group_name} 测速完成，但全部失败")
+
+# 获取北京时间
 now = datetime.utcnow() + timedelta(hours=8)
 update_time = now.strftime("%Y%m%d %H:%M")
 
 # 写入文件
 with open(outfile, "w", encoding="utf-8") as f:
-    # ✅ 写入动态北京时间
     f.write("更新时间,#genre#\n")
     f.write(f"{update_time},https://d.kstore.dev/download/8880/%E5%85%AC%E5%91%8A.mp4\n")
     f.write("关于本源(塔利班维护),https://v.cdnlz12.com/20250131/18183_a5e8965b/index.m3u8\n\n")
     
-    # 写入分组内容
     for g, items in groups.items():
         f.write(f"{g},#genre#\n")
         for i in items:
@@ -153,4 +160,4 @@ with open(outfile, "w", encoding="utf-8") as f:
         f.write("\n")
 
 total = sum(len(v) for v in groups.values())
-print(f"✅ 已生成 {outfile}，共 {total} 条直播源，分组内按要求排序完成（北京时间）")
+print(f"✅ 已生成 {outfile}，共 {total} 条直播源（测速+排序完成，北京时间）")
